@@ -28,7 +28,7 @@ TEST_CASE("transaction") {
     REQUIRE(!storage.is_opened());
     storage.sync_schema();
     REQUIRE(!storage.is_opened());
-    storage.transaction([&] {
+    storage.transaction([&storage] {
         storage.insert(Object{0, "Jack"});
         return true;
     });

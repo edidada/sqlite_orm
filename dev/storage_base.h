@@ -491,9 +491,8 @@ namespace sqlite_orm {
             storage_base(const std::string& filename_, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
                 limit(std::bind(&storage_base::get_connection, this)),
-                inMemory(filename_.empty() || filename_ == ":memory:"),
-                connection(std::make_unique<connection_holder>(filename_)), cachedForeignKeysCount(foreignKeysCount) {
-                if(this->inMemory) {
+                connection(std::make_shared<connection_holder>(filename_)), cachedForeignKeysCount(foreignKeysCount) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -501,10 +500,10 @@ namespace sqlite_orm {
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
-                limit(std::bind(&storage_base::get_connection, this)), inMemory(other.inMemory),
-                connection(std::make_unique<connection_holder>(other.connection->filename)),
+                limit(std::bind(&storage_base::get_connection, this)),
+                connection(std::make_shared<connection_holder>(other.connection->filename)),
                 cachedForeignKeysCount(other.cachedForeignKeysCount) {
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -514,7 +513,7 @@ namespace sqlite_orm {
                 if(this->isOpenedForever) {
                     this->connection->release();
                 }
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->release();
                 }
             }
@@ -795,9 +794,8 @@ namespace sqlite_orm {
                 return notEqual;
             }
 
-            const bool inMemory;
             bool isOpenedForever = false;
-            std::unique_ptr<connection_holder> connection;
+            std::shared_ptr<connection_holder> connection;
             std::map<std::string, collating_function> collatingFunctions;
             const int cachedForeignKeysCount;
             std::function<int(int)> _busy_handler;

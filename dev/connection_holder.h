@@ -11,7 +11,8 @@ namespace sqlite_orm {
 
         struct connection_holder {
 
-            connection_holder(std::string filename_) : filename(move(filename_)) {}
+            connection_holder(std::string filename_) :
+                inMemory(filename_.empty() || filename_ == ":memory:"), filename(move(filename_)) {}
 
             void retain() {
                 ++this->_retain_count;
@@ -41,6 +42,7 @@ namespace sqlite_orm {
                 return this->_retain_count;
             }
 
+            const bool inMemory;
             const std::string filename;
 
           protected:

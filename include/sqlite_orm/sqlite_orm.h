@@ -364,6 +364,7 @@ namespace sqlite_orm {
         index_is_out_of_bounds,
         value_is_null,
         no_tables_specified,
+        migration_not_found,
     };
 
 }
@@ -10614,7 +10615,8 @@ namespace sqlite_orm {
 
         struct connection_holder {
 
-            connection_holder(std::string filename_) : filename(move(filename_)) {}
+            connection_holder(std::string filename_) :
+                inMemory(filename_.empty() || filename_ == ":memory:"), filename(move(filename_)) {}
 
             void retain() {
                 ++this->_retain_count;
@@ -10644,6 +10646,7 @@ namespace sqlite_orm {
                 return this->_retain_count;
             }
 
+            const bool inMemory;
             const std::string filename;
 
           protected:
@@ -13910,9 +13913,8 @@ namespace sqlite_orm {
             storage_base(const std::string& filename_, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
                 limit(std::bind(&storage_base::get_connection, this)),
-                inMemory(filename_.empty() || filename_ == ":memory:"),
-                connection(std::make_unique<connection_holder>(filename_)), cachedForeignKeysCount(foreignKeysCount) {
-                if(this->inMemory) {
+                connection(std::make_shared<connection_holder>(filename_)), cachedForeignKeysCount(foreignKeysCount) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -13920,10 +13922,10 @@ namespace sqlite_orm {
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
-                limit(std::bind(&storage_base::get_connection, this)), inMemory(other.inMemory),
-                connection(std::make_unique<connection_holder>(other.connection->filename)),
+                limit(std::bind(&storage_base::get_connection, this)),
+                connection(std::make_shared<connection_holder>(other.connection->filename)),
                 cachedForeignKeysCount(other.cachedForeignKeysCount) {
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -13933,7 +13935,7 @@ namespace sqlite_orm {
                 if(this->isOpenedForever) {
                     this->connection->release();
                 }
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->release();
                 }
             }
@@ -14214,9 +14216,8 @@ namespace sqlite_orm {
                 return notEqual;
             }
 
-            const bool inMemory;
             bool isOpenedForever = false;
-            std::unique_ptr<connection_holder> connection;
+            std::shared_ptr<connection_holder> connection;
             std::map<std::string, collating_function> collatingFunctions;
             const int cachedForeignKeysCount;
             std::function<int(int)> _busy_handler;
@@ -16778,6 +16779,8 @@ namespace sqlite_orm {
 
 namespace sqlite_orm {
 
+    struct connection_container;
+
     namespace internal {
 
         template<class S, class E, class SFINAE = void>
@@ -16795,6 +16798,7 @@ namespace sqlite_orm {
         struct storage_t : storage_base {
             using self = storage_t<Ts...>;
             using impl_type = storage_impl<Ts...>;
+            using migration_t = std::function<void(const connection_container&)>;
 
             /**
              *  @param filename database filename.
@@ -16806,8 +16810,10 @@ namespace sqlite_orm {
             storage_t(const storage_t& other) : storage_base(other), impl(other.impl) {}
 
           protected:
-            impl_type impl;
+            using migration_key = std::pair<int, int>;
 
+            impl_type impl;
+            std::map<migration_key, migration_t> migrations;
             /**
              *  Obtain a storage_t's const storage_impl.
              *  
@@ -16868,6 +16874,7 @@ namespace sqlite_orm {
                     }
                 }
             }
+
             template<class I>
             void drop_create_with_loss(sqlite3* db, const I& tImpl) {
                 // eliminated all transaction handling
@@ -16950,6 +16957,25 @@ namespace sqlite_orm {
 
                 auto con = this->get_connection();
                 return {*this, std::move(con), std::forward<Args>(args)...};
+            }
+
+            void register_migration(int from, int to, migration_t migration) {
+                migration_key key{from, to};
+                this->migrations[key] = move(migration);
+            }
+
+            void migrate_to(int to) {
+                auto con = this->get_connection();
+                auto currentVersion = this->pragma.user_version();
+                migration_key key{currentVersion, to};
+                auto it = this->migrations.find(key);
+                if(it != this->migrations.end()) {
+                    auto& migration = it->second;
+                    sqlite3* db = con.get();
+                    migration(db);
+                } else {
+                    throw std::system_error{orm_error_code::migration_not_found};
+                }
             }
 
             /**

@@ -39,3 +39,4 @@
 #include "../../dev/dbstat.h"
 #include "../../dev/interface_definitions.h"
 #include "../../dev/finish_macros.h"
+#include "../../dev/connection_container.h"

@@ -639,3 +639,55 @@ TEST_CASE("Explicit insert") {
         }
     }
 }
+
+TEST_CASE("migrations") {
+
+    auto filename = "db.sqlite";
+    ::remove(filename);
+
+    //  perform the first version
+    {
+        struct User {
+            int id = 0;
+            std::string name;
+
+            bool operator==(const User &user) const {
+                return this->id == user.id && this->name == user.name;
+            }
+        };
+        auto storage = make_storage(
+            filename,
+            make_table("users", make_column("id", &User::id, primary_key()), make_column("name", &User::name)));
+        storage.sync_schema();
+
+        storage.replace(User{1, "Sertab Erener"});
+        storage.replace(User{2, "Inna"});
+
+        REQUIRE(storage.pragma.user_version() == 0);
+        REQUIRE(storage.count<User>() == 2);
+    }
+
+    //  let's move from 0 to 1: we'll split name to first name and last name by spaces
+    {
+        struct User {
+            int id = 0;
+            std::string firstName;
+            std::string lastName;
+        };
+        auto storage = make_storage(filename,
+                                    make_table("users",
+                                               make_column("id", &User::id, primary_key()),
+                                               make_column("first_name", &User::firstName),
+                                               make_column("last_name", &User::lastName)));
+        storage.register_migration(0, 1, [](const connection_container &connection) {
+            struct OldUser {
+                int id = 0;
+                std::string name;
+            };
+            /*auto oldStorage = make_storage(connection,
+                                           make_table("users",
+                                                      make_column("id", &OldUser::id, primary_key()),
+                                                      make_column("name", &OldUser::name)));*/
+        });
+    }
+}
