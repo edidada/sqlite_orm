@@ -12,6 +12,9 @@ namespace sqlite_orm {
         internal::storage_t<Ts...> make_storage(Ts... tables) const {
             
         }*/
+        connection_container(std::shared_ptr<internal::connection_holder> connection_holder) :
+            connection_holder(move(connection_holder)) {}
+
       private:
         std::shared_ptr<internal::connection_holder> connection_holder;
     };

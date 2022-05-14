@@ -53,10 +53,11 @@
 #include "index.h"
 #include "util.h"
 #include "serializing_util.h"
+#include "connection_container.h"
 
 namespace sqlite_orm {
 
-    struct connection_container;
+    //    struct connection_container;
 
     namespace internal {
 
@@ -242,14 +243,14 @@ namespace sqlite_orm {
             }
 
             void migrate_to(int to) {
-                auto con = this->get_connection();
+                auto con = this->get_connection();  //  we must keep the connection
                 auto currentVersion = this->pragma.user_version();
                 migration_key key{currentVersion, to};
                 auto it = this->migrations.find(key);
                 if(it != this->migrations.end()) {
                     auto& migration = it->second;
-                    sqlite3* db = con.get();
-                    migration(db);
+                    connection_container connectionContainer(this->connection);
+                    migration(connectionContainer);
                 } else {
                     throw std::system_error{orm_error_code::migration_not_found};
                 }
