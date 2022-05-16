@@ -53,11 +53,8 @@
 #include "index.h"
 #include "util.h"
 #include "serializing_util.h"
-#include "connection_container.h"
 
 namespace sqlite_orm {
-
-    //    struct connection_container;
 
     namespace internal {
 
@@ -76,7 +73,6 @@ namespace sqlite_orm {
         struct storage_t : storage_base {
             using self = storage_t<Ts...>;
             using impl_type = storage_impl<Ts...>;
-            using migration_t = std::function<void(const connection_container&)>;
 
             /**
              *  @param filename database filename.
@@ -87,11 +83,11 @@ namespace sqlite_orm {
 
             storage_t(const storage_t& other) : storage_base(other), impl(other.impl) {}
 
-          protected:
-            using migration_key = std::pair<int, int>;
+            storage_t(const connection_container& connectionContainer, impl_type impl_) :
+                storage_base{connectionContainer, foreign_keys_count(impl_)}, impl(std::move(impl_)) {}
 
+          protected:
             impl_type impl;
-            std::map<migration_key, migration_t> migrations;
             /**
              *  Obtain a storage_t's const storage_impl.
              *  
@@ -235,25 +231,6 @@ namespace sqlite_orm {
 
                 auto con = this->get_connection();
                 return {*this, std::move(con), std::forward<Args>(args)...};
-            }
-
-            void register_migration(int from, int to, migration_t migration) {
-                migration_key key{from, to};
-                this->migrations[key] = move(migration);
-            }
-
-            void migrate_to(int to) {
-                auto con = this->get_connection();  //  we must keep the connection
-                auto currentVersion = this->pragma.user_version();
-                migration_key key{currentVersion, to};
-                auto it = this->migrations.find(key);
-                if(it != this->migrations.end()) {
-                    auto& migration = it->second;
-                    connection_container connectionContainer(this->connection);
-                    migration(connectionContainer);
-                } else {
-                    throw std::system_error{orm_error_code::migration_not_found};
-                }
             }
 
             /**

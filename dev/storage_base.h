@@ -24,13 +24,18 @@
 #include "arg_values.h"
 #include "util.h"
 #include "serializing_util.h"
+//#include "connection_container.h"
 
 namespace sqlite_orm {
+
+    struct connection_container;
 
     namespace internal {
 
         struct storage_base {
             using collating_function = std::function<int(int, const void*, int, const void*)>;
+            using migration_t = std::function<void(const connection_container&)>;
+            using migration_key = std::pair<int, int>;
 
             std::function<void(sqlite3*)> on_open;
             pragma_t pragma;
@@ -487,6 +492,10 @@ namespace sqlite_orm {
                 }
             }
 
+            void register_migration(int from, int to, migration_t migration);
+
+            void migrate_to(int to);
+
           protected:
             storage_base(const std::string& filename_, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
@@ -497,6 +506,16 @@ namespace sqlite_orm {
                     this->on_open_internal(this->connection->get());
                 }
             }
+
+            /*storage_base(const connection_container &connectionContainer, int foreignKeysCount) :
+            pragma(std::bind(&storage_base::get_connection, this)),
+            limit(std::bind(&storage_base::get_connection, this)),
+            connection(connectionContainer.connection_holder),
+            cachedForeignKeysCount(foreignKeysCount) {
+            if(this->connection->inMemory) {
+                this->connection->retain();
+                this->on_open_internal(this->connection->get());
+            }*/
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
@@ -801,6 +820,7 @@ namespace sqlite_orm {
             std::function<int(int)> _busy_handler;
             std::vector<std::unique_ptr<user_defined_function_base>> scalarFunctions;
             std::vector<std::unique_ptr<user_defined_function_base>> aggregateFunctions;
+            std::map<migration_key, migration_t> migrations;
         };
     }
 }

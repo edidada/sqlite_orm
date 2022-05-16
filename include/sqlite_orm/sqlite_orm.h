@@ -13447,12 +13447,18 @@ namespace sqlite_orm {
 
 // #include "serializing_util.h"
 
+//#include "connection_container.h"
+
 namespace sqlite_orm {
+
+    struct connection_container;
 
     namespace internal {
 
         struct storage_base {
             using collating_function = std::function<int(int, const void*, int, const void*)>;
+            using migration_t = std::function<void(const connection_container&)>;
+            using migration_key = std::pair<int, int>;
 
             std::function<void(sqlite3*)> on_open;
             pragma_t pragma;
@@ -13909,6 +13915,10 @@ namespace sqlite_orm {
                 }
             }
 
+            void register_migration(int from, int to, migration_t migration);
+
+            void migrate_to(int to);
+
           protected:
             storage_base(const std::string& filename_, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
@@ -13919,6 +13929,16 @@ namespace sqlite_orm {
                     this->on_open_internal(this->connection->get());
                 }
             }
+
+            /*storage_base(const connection_container &connectionContainer, int foreignKeysCount) :
+            pragma(std::bind(&storage_base::get_connection, this)),
+            limit(std::bind(&storage_base::get_connection, this)),
+            connection(connectionContainer.connection_holder),
+            cachedForeignKeysCount(foreignKeysCount) {
+            if(this->connection->inMemory) {
+                this->connection->retain();
+                this->on_open_internal(this->connection->get());
+            }*/
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
@@ -14223,6 +14243,7 @@ namespace sqlite_orm {
             std::function<int(int)> _busy_handler;
             std::vector<std::unique_ptr<user_defined_function_base>> scalarFunctions;
             std::vector<std::unique_ptr<user_defined_function_base>> aggregateFunctions;
+            std::map<migration_key, migration_t> migrations;
         };
     }
 }
@@ -16777,32 +16798,7 @@ namespace sqlite_orm {
 
 // #include "serializing_util.h"
 
-// #include "connection_container.h"
-
-#include <memory>  //  std::shared_ptr
-
-// #include "connection_holder.h"
-
-// #include "storage.h"
-
 namespace sqlite_orm {
-    struct connection_container {
-
-        /*template<class... Ts>
-        internal::storage_t<Ts...> make_storage(Ts... tables) const {
-            
-        }*/
-        connection_container(std::shared_ptr<internal::connection_holder> connection_holder) :
-            connection_holder(move(connection_holder)) {}
-
-      private:
-        std::shared_ptr<internal::connection_holder> connection_holder;
-    };
-}
-
-namespace sqlite_orm {
-
-    //    struct connection_container;
 
     namespace internal {
 
@@ -16821,7 +16817,6 @@ namespace sqlite_orm {
         struct storage_t : storage_base {
             using self = storage_t<Ts...>;
             using impl_type = storage_impl<Ts...>;
-            using migration_t = std::function<void(const connection_container&)>;
 
             /**
              *  @param filename database filename.
@@ -16832,11 +16827,11 @@ namespace sqlite_orm {
 
             storage_t(const storage_t& other) : storage_base(other), impl(other.impl) {}
 
-          protected:
-            using migration_key = std::pair<int, int>;
+            storage_t(const connection_container& connectionContainer, impl_type impl_) :
+                storage_base{connectionContainer, foreign_keys_count(impl_)}, impl(std::move(impl_)) {}
 
+          protected:
             impl_type impl;
-            std::map<migration_key, migration_t> migrations;
             /**
              *  Obtain a storage_t's const storage_impl.
              *  
@@ -16980,25 +16975,6 @@ namespace sqlite_orm {
 
                 auto con = this->get_connection();
                 return {*this, std::move(con), std::forward<Args>(args)...};
-            }
-
-            void register_migration(int from, int to, migration_t migration) {
-                migration_key key{from, to};
-                this->migrations[key] = move(migration);
-            }
-
-            void migrate_to(int to) {
-                auto con = this->get_connection();  //  we must keep the connection
-                auto currentVersion = this->pragma.user_version();
-                migration_key key{currentVersion, to};
-                auto it = this->migrations.find(key);
-                if(it != this->migrations.end()) {
-                    auto& migration = it->second;
-                    connection_container connectionContainer(this->connection);
-                    migration(connectionContainer);
-                } else {
-                    throw std::system_error{orm_error_code::migration_not_found};
-                }
             }
 
             /**
@@ -19251,6 +19227,59 @@ namespace sqlite_orm {
                << "SELECT " << streaming_identifiers(columnNames) << " FROM " << streaming_identifier(sourceTableName)
                << std::flush;
             perform_void_exec(db, ss.str());
+        }
+    }
+}
+
+// #include "implementations/storage_base_definitions.h"
+
+// #include "../connection_container.h"
+
+#include <memory>  //  std::shared_ptr
+
+// #include "connection_holder.h"
+
+// #include "storage.h"
+
+namespace sqlite_orm {
+    namespace internal {
+        struct storage_base;
+    }
+
+    struct connection_container {
+
+        template<class... Ts>
+        internal::storage_t<Ts...> make_storage(Ts... tables) const {}
+
+        connection_container(std::shared_ptr<internal::connection_holder> connection_holder) :
+            connection_holder(move(connection_holder)) {}
+
+      private:
+        friend struct internal::storage_base;
+
+        std::shared_ptr<internal::connection_holder> connection_holder;
+    };
+}
+
+namespace sqlite_orm {
+    namespace internal {
+        inline void storage_base::register_migration(int from, int to, migration_t migration) {
+            migration_key key{from, to};
+            this->migrations[key] = move(migration);
+        }
+
+        inline void storage_base::migrate_to(int to) {
+            auto con = this->get_connection();  //  we must keep the connection
+            auto currentVersion = this->pragma.user_version();
+            migration_key key{currentVersion, to};
+            auto it = this->migrations.find(key);
+            if(it != this->migrations.end()) {
+                auto& migration = it->second;
+                connection_container connectionContainer(this->connection);
+                migration(connectionContainer);
+            } else {
+                throw std::system_error{orm_error_code::migration_not_found};
+            }
         }
     }
 }
