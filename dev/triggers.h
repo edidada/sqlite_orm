@@ -5,8 +5,7 @@
 #include <string>
 #include <tuple>
 
-#include "start_macros.h"
-#include "tuple_helper/tuple_helper.h"
+#include "functional/cxx_universal.h"
 #include "optional_container.h"
 
 // NOTE Idea : Maybe also implement a custom trigger system to call a c++ callback when a trigger triggers ?
@@ -60,7 +59,7 @@ namespace sqlite_orm {
          */
         template<class T, class... S>
         struct trigger_t : base_trigger {
-            using object_type = void;  // Not sure
+            using object_type = void;
             using elements_type = typename partial_trigger_t<T, S...>::statements_type;
 
             /**
