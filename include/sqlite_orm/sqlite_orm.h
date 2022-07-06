@@ -13684,8 +13684,6 @@ namespace sqlite_orm {
 
 // #include "serializing_util.h"
 
-//#include "connection_container.h"
-
 namespace sqlite_orm {
 
     struct connection_container;

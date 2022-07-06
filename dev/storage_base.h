@@ -26,7 +26,6 @@
 #include "arg_values.h"
 #include "util.h"
 #include "serializing_util.h"
-//#include "connection_container.h"
 
 namespace sqlite_orm {
 
