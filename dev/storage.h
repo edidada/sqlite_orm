@@ -81,10 +81,10 @@ namespace sqlite_orm {
             storage_t(std::string filename, db_objects_type dbObjects) :
                 storage_base{move(filename), foreign_keys_count(dbObjects)}, db_objects{std::move(dbObjects)} {}
 
-            storage_t(const connection_container& connectionContainer, db_objects_type dbObjects) :
-                storage_base{connectionContainer, foreign_keys_count(dbObjects)}, db_objects{std::move(dbObjects)} {}
+            storage_t(std::shared_ptr<internal::connection_holder> connectionHolder, db_objects_type dbObjects) :
+                storage_base{move(connectionHolder), foreign_keys_count(dbObjects)}, db_objects{std::move(dbObjects)} {}
 
-        private:
+          private:
             db_objects_type db_objects;
 
             /**

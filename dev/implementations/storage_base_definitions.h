@@ -12,12 +12,16 @@ namespace sqlite_orm {
         inline void storage_base::migrate_to(int to) {
             auto con = this->get_connection();  //  we must keep the connection
             auto currentVersion = this->pragma.user_version();
+            if(currentVersion == to) {
+                return;
+            }
             migration_key key{currentVersion, to};
             auto it = this->migrations.find(key);
             if(it != this->migrations.end()) {
                 auto& migration = it->second;
                 connection_container connectionContainer(this->connection);
                 migration(connectionContainer);
+                this->pragma.user_version(to);
             } else {
                 throw std::system_error{orm_error_code::migration_not_found};
             }

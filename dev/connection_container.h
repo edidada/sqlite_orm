@@ -13,7 +13,10 @@ namespace sqlite_orm {
     struct connection_container {
 
         template<class... Ts>
-        internal::storage_t<Ts...> make_storage(Ts... tables) const {}
+        internal::storage_t<Ts...> make_storage(Ts... tables) const {
+            using ReturnType = internal::storage_t<Ts...>;
+            return ReturnType(this->connection_holder, std::forward<Ts>(tables)...);
+        }
 
         connection_container(std::shared_ptr<internal::connection_holder> connection_holder) :
             connection_holder(move(connection_holder)) {}

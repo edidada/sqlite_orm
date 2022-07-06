@@ -526,15 +526,15 @@ namespace sqlite_orm {
                 }
             }
 
-            /*storage_base(const connection_container &connectionContainer, int foreignKeysCount) :
-            pragma(std::bind(&storage_base::get_connection, this)),
-            limit(std::bind(&storage_base::get_connection, this)),
-            connection(connectionContainer.connection_holder),
-            cachedForeignKeysCount(foreignKeysCount) {
-            if(this->connection->inMemory) {
-                this->connection->retain();
-                this->on_open_internal(this->connection->get());
-            }*/
+            storage_base(std::shared_ptr<internal::connection_holder> connectionHolder, int foreignKeysCount) :
+                pragma(std::bind(&storage_base::get_connection, this)),
+                limit(std::bind(&storage_base::get_connection, this)), connection(move(connectionHolder)),
+                cachedForeignKeysCount(foreignKeysCount) {
+                if(this->connection->inMemory) {
+                    this->connection->retain();
+                    this->on_open_internal(this->connection->get());
+                }
+            }
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
