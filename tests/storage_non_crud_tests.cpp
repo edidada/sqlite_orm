@@ -666,6 +666,12 @@ TEST_CASE("migrations") {
             std::string firstName;
             std::string lastName;
 
+#ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
+            User() = default;
+            User(int id, std::string firstName, std::string lastName) :
+                id{id}, firstName{move(firstName)}, lastName{move(lastName)} {}
+#endif
+
             bool operator==(const User &other) const {
                 return this->id == other.id && this->firstName == other.firstName && this->lastName == other.lastName;
             }
