@@ -1433,22 +1433,22 @@ namespace sqlite_orm {
                             return;
                         }
                         table.template for_each_foreign_key_to<O>([this, &table, &object, &res](auto& foreignKey) {
-                            std::stringstream ss;
-                            ss << "SELECT COUNT(*)"
-                               << " FROM " << streaming_identifier(table.name) << " WHERE ";
-                            iterate_tuple(foreignKey.columns, [&ss, &table, first = true](auto& colRef) mutable {
+                            std::stringstream sss;
+                            sss << "SELECT COUNT(*)"
+                                << " FROM " << streaming_identifier(table.name) << " WHERE ";
+                            iterate_tuple(foreignKey.columns, [&sss, &table, first = true](auto& colRef) mutable {
                                 auto* columnName = table.find_column_name(colRef);
                                 if(!columnName) {
                                     throw std::system_error{orm_error_code::column_not_found};
                                 }
 
                                 constexpr std::array<const char*, 2> sep = {" AND ", ""};
-                                ss << sep[std::exchange(first, false)] << streaming_identifier(*columnName) << " = ?";
+                                sss << sep[std::exchange(first, false)] << streaming_identifier(*columnName) << " = ?";
                             });
-                            ss.flush();
+                            sss.flush();
 
                             auto con = this->get_connection();
-                            sqlite3_stmt* stmt = prepare_stmt(con.get(), ss.str());
+                            sqlite3_stmt* stmt = prepare_stmt(con.get(), sss.str());
                             statement_finalizer finalizer{stmt};
 
                             auto& targetTable = this->get_table<O>();
