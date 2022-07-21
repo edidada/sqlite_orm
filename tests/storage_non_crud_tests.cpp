@@ -647,9 +647,15 @@ TEST_CASE("migrations") {
                 return this->id == user.id && this->name == user.name;
             }
         };
+
+        struct Visit {
+            int id = 0;
+        };
+
         auto storage = make_storage(
             filename,
-            make_table("users", make_column("id", &User::id, primary_key()), make_column("name", &User::name)));
+            make_table("users", make_column("id", &User::id, primary_key()), make_column("name", &User::name)),
+            make_table("visits", make_column("id", &Visit::id, primary_key())));
         storage.sync_schema();
 
         storage.replace(User{1, "Sertab Erener"});
@@ -676,21 +682,28 @@ TEST_CASE("migrations") {
                 return this->id == other.id && this->firstName == other.firstName && this->lastName == other.lastName;
             }
         };
+        struct Visit {
+            int id = 0;
+        };
+
         auto migrationCallsCount = 0;
         auto storage = make_storage(filename,
                                     make_table("users",
                                                make_column("id", &User::id, primary_key()),
                                                make_column("first_name", &User::firstName),
-                                               make_column("last_name", &User::lastName)));
+                                               make_column("last_name", &User::lastName)),
+                                    make_table("visits", make_column("id", &Visit::id, primary_key())));
         storage.register_migration(0, 1, [&storage, &migrationCallsCount](const connection_container &connection) {
             ++migrationCallsCount;
             struct OldUser {
                 int id = 0;
                 std::string name;
             };
-            auto oldStorage = connection.make_storage(make_table("users",
-                                                                 make_column("id", &OldUser::id, primary_key()),
-                                                                 make_column("name", &OldUser::name)));
+            auto oldStorage =
+                connection.make_storage(make_table("users",
+                                                   make_column("id", &OldUser::id, primary_key()),
+                                                   make_column("name", &OldUser::name)),
+                                        make_table("visits", make_column("id", &Visit::id, primary_key())));
             auto oldUsers = oldStorage.get_all<OldUser>();
             storage.sync_schema();  //
             for(auto &oldUser: oldUsers) {
