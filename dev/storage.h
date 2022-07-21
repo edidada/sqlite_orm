@@ -1436,15 +1436,20 @@ namespace sqlite_orm {
                             std::stringstream sss;
                             sss << "SELECT COUNT(*)"
                                 << " FROM " << streaming_identifier(table.name) << " WHERE ";
-                            iterate_tuple(foreignKey.columns, [&sss, &table, first = true](auto& colRef) mutable {
-                                auto* columnName = table.find_column_name(colRef);
-                                if(!columnName) {
-                                    throw std::system_error{orm_error_code::column_not_found};
-                                }
+                            iterate_tuple(foreignKey.columns,
+                                          std::bind(
+                                              [&table, first = true](auto& colRef, auto& sss) mutable {
+                                                  auto* columnName = table.find_column_name(colRef);
+                                                  if(!columnName) {
+                                                      throw std::system_error{orm_error_code::column_not_found};
+                                                  }
 
-                                constexpr std::array<const char*, 2> sep = {" AND ", ""};
-                                sss << sep[std::exchange(first, false)] << streaming_identifier(*columnName) << " = ?";
-                            });
+                                                  constexpr std::array<const char*, 2> sep = {" AND ", ""};
+                                                  sss << sep[std::exchange(first, false)]
+                                                      << streaming_identifier(*columnName) << " = ?";
+                                              },
+                                              std::placeholders::_1,
+                                              std::ref(sss)));
                             sss.flush();
 
                             auto con = this->get_connection();
