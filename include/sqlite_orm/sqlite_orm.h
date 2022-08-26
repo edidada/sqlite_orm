@@ -1045,6 +1045,76 @@ namespace sqlite_orm {
 
 // #include "../functional/cxx_universal.h"
 
+// #include "../functional/index_sequence_util.h"
+
+#include <utility>  //  std::index_sequence, std::make_index_sequence
+
+// #include "../functional/cxx_universal.h"
+
+#ifdef SQLITE_ORM_RELAXED_CONSTEXPR_SUPPORTED
+#include <array>
+#endif
+
+namespace sqlite_orm {
+    namespace internal {
+        /**
+         *  Get the first value of an index_sequence.
+         */
+        template<size_t I, size_t... Idx>
+        SQLITE_ORM_CONSTEVAL size_t first_index_sequence_value(std::index_sequence<I, Idx...>) {
+            return I;
+        }
+
+#ifdef SQLITE_ORM_RELAXED_CONSTEXPR_SUPPORTED
+        /**
+         *  Reorder the values of an index_sequence according to the positions from a second sequence.
+         */
+        template<size_t... Value, size_t... IdxOfValue>
+        SQLITE_ORM_CONSTEVAL auto reorder_index_sequence(std::index_sequence<Value...>,
+                                                         std::index_sequence<IdxOfValue...>) {
+            constexpr std::array<size_t, sizeof...(Value)> values{Value...};
+            return std::index_sequence<values[sizeof...(Value) - 1u - IdxOfValue]...>{};
+        }
+
+        template<size_t Value, size_t IdxOfValue>
+        SQLITE_ORM_CONSTEVAL std::index_sequence<Value> reorder_index_sequence(std::index_sequence<Value>,
+                                                                               std::index_sequence<IdxOfValue>) {
+            return {};
+        }
+
+        inline SQLITE_ORM_CONSTEVAL std::index_sequence<> reorder_index_sequence(std::index_sequence<>,
+                                                                                 std::index_sequence<>) {
+            return {};
+        }
+
+        /**
+         *  Reverse the values of an index_sequence.
+         */
+        template<size_t... Idx>
+        SQLITE_ORM_CONSTEVAL auto reverse_index_sequence(std::index_sequence<Idx...>) {
+            return reorder_index_sequence(std::index_sequence<Idx...>{}, std::make_index_sequence<sizeof...(Idx)>{});
+        }
+#endif
+
+        template<class... Seq>
+        struct flatten_idxseq {
+            using type = std::index_sequence<>;
+        };
+
+        template<size_t... Ix>
+        struct flatten_idxseq<std::index_sequence<Ix...>> {
+            using type = std::index_sequence<Ix...>;
+        };
+
+        template<size_t... As, size_t... Bs, class... Seq>
+        struct flatten_idxseq<std::index_sequence<As...>, std::index_sequence<Bs...>, Seq...>
+            : flatten_idxseq<std::index_sequence<As..., Bs...>, Seq...> {};
+
+        template<class... Seq>
+        using flatten_idxseq_t = typename flatten_idxseq<Seq...>::type;
+    }
+}
+
 namespace sqlite_orm {
     namespace internal {
 
@@ -1067,27 +1137,13 @@ namespace sqlite_orm {
         template<class Tpl, class Seq>
         using tuple_from_index_sequence_t = typename tuple_from_index_sequence<Tpl, Seq>::type;
 
-        template<class... Seq>
-        struct concat_idx_seq {
-            using type = std::index_sequence<>;
-        };
-
-        template<size_t... Idx>
-        struct concat_idx_seq<std::index_sequence<Idx...>> {
-            using type = std::index_sequence<Idx...>;
-        };
-
-        template<size_t... As, size_t... Bs, class... Seq>
-        struct concat_idx_seq<std::index_sequence<As...>, std::index_sequence<Bs...>, Seq...>
-            : concat_idx_seq<std::index_sequence<As..., Bs...>, Seq...> {};
-
         template<class Tpl, template<class...> class Pred, template<class...> class Proj, class Seq>
         struct filter_tuple_sequence;
 
 #ifndef SQLITE_ORM_BROKEN_VARIADIC_PACK_EXPANSION
         template<class Tpl, template<class...> class Pred, template<class...> class Proj, size_t... Idx>
         struct filter_tuple_sequence<Tpl, Pred, Proj, std::index_sequence<Idx...>>
-            : concat_idx_seq<std::conditional_t<Pred<Proj<std::tuple_element_t<Idx, Tpl>>>::value,
+            : flatten_idxseq<std::conditional_t<Pred<Proj<std::tuple_element_t<Idx, Tpl>>>::value,
                                                 std::index_sequence<Idx>,
                                                 std::index_sequence<>>...> {};
 #else
@@ -1103,7 +1159,7 @@ namespace sqlite_orm {
 
         template<class Tpl, template<class...> class Pred, template<class...> class Proj, size_t... Idx>
         struct filter_tuple_sequence<Tpl, Pred, Proj, std::index_sequence<Idx...>>
-            : concat_idx_seq<typename tuple_seq_single<Idx, Proj<std::tuple_element_t<Idx, Tpl>>, Pred>::type...> {};
+            : flatten_idxseq<typename tuple_seq_single<Idx, Proj<std::tuple_element_t<Idx, Tpl>>, Pred>::type...> {};
 #endif
 
         template<class Tpl,
@@ -1195,29 +1251,34 @@ namespace sqlite_orm {
          */
         struct autoincrement_t {};
 
+        enum class conflict_clause_t {
+            rollback,
+            abort,
+            fail,
+            ignore,
+            replace,
+        };
+
         struct primary_key_base {
             enum class order_by {
                 unspecified,
                 ascending,
                 descending,
             };
+            struct {
+                order_by asc_option = order_by::unspecified;
+                conflict_clause_t conflict_clause = conflict_clause_t::rollback;
+                bool conflict_clause_is_on = false;
+            } options;
+        };
 
-            order_by asc_option = order_by::unspecified;
+        template<class T>
+        struct primary_key_with_autoincrement {
+            using primary_key_type = T;
 
-            operator std::string() const {
-                std::string res = "PRIMARY KEY";
-                switch(this->asc_option) {
-                    case order_by::ascending:
-                        res += " ASC";
-                        break;
-                    case order_by::descending:
-                        res += " DESC";
-                        break;
-                    default:
-                        break;
-                }
-                return res;
-            }
+            primary_key_type primary_key;
+
+            primary_key_with_autoincrement(primary_key_type primary_key_) : primary_key(primary_key_) {}
         };
 
         /**
@@ -1227,22 +1288,62 @@ namespace sqlite_orm {
          */
         template<class... Cs>
         struct primary_key_t : primary_key_base {
+            using self = primary_key_t<Cs...>;
             using order_by = primary_key_base::order_by;
             using columns_tuple = std::tuple<Cs...>;
 
             columns_tuple columns;
 
-            primary_key_t(decltype(columns) c) : columns(move(c)) {}
+            primary_key_t(decltype(columns) columns) : columns(move(columns)) {}
 
-            primary_key_t<Cs...> asc() const {
+            self asc() const {
                 auto res = *this;
-                res.asc_option = order_by::ascending;
+                res.options.asc_option = order_by::ascending;
                 return res;
             }
 
-            primary_key_t<Cs...> desc() const {
+            self desc() const {
                 auto res = *this;
-                res.asc_option = order_by::descending;
+                res.options.asc_option = order_by::descending;
+                return res;
+            }
+
+            primary_key_with_autoincrement<self> autoincrement() const {
+                return {*this};
+            }
+
+            self on_conflict_rollback() const {
+                auto res = *this;
+                res.options.conflict_clause_is_on = true;
+                res.options.conflict_clause = conflict_clause_t::rollback;
+                return res;
+            }
+
+            self on_conflict_abort() const {
+                auto res = *this;
+                res.options.conflict_clause_is_on = true;
+                res.options.conflict_clause = conflict_clause_t::abort;
+                return res;
+            }
+
+            self on_conflict_fail() const {
+                auto res = *this;
+                res.options.conflict_clause_is_on = true;
+                res.options.conflict_clause = conflict_clause_t::fail;
+                return res;
+            }
+
+            self on_conflict_ignore() const {
+                auto res = *this;
+                res.options.conflict_clause_is_on = true;
+                res.options.conflict_clause = conflict_clause_t::ignore;
+                return res;
+            }
+
+            self on_conflict_replace() const {
+                auto res = *this;
+                res.options.conflict_clause_is_on = true;
+                res.options.conflict_clause = conflict_clause_t::replace;
                 return res;
             }
         };
@@ -1551,7 +1652,13 @@ namespace sqlite_orm {
         using is_foreign_key = polyfill::bool_constant<is_foreign_key_v<T>>;
 
         template<class T>
-        using is_primary_key = polyfill::is_specialization_of<T, primary_key_t>;
+        struct is_primary_key : std::false_type {};
+
+        template<class... Cs>
+        struct is_primary_key<primary_key_t<Cs...>> : std::true_type {};
+
+        template<class T>
+        struct is_primary_key<primary_key_with_autoincrement<T>> : std::true_type {};
 
         template<class T>
         SQLITE_ORM_INLINE_VAR constexpr bool is_primary_key_v = is_primary_key<T>::value;
@@ -1573,10 +1680,12 @@ namespace sqlite_orm {
          */
         template<typename T>
         struct is_primary_key_insertable
-            : polyfill::disjunction<mpl::instantiate<mpl::disjunction<check_if_tuple_has<is_autoincrement>,
-                                                                      check_if_tuple_has_template<default_t>>,
-                                                     constraints_type_t<T>>,
-                                    std::is_base_of<integer_printer, type_printer<field_type_t<T>>>> {
+            : polyfill::disjunction<
+                  mpl::instantiate<mpl::disjunction<check_if_tuple_has<is_autoincrement>,
+                                                    check_if_tuple_has_template<default_t>,
+                                                    check_if_tuple_has_template<primary_key_with_autoincrement>>,
+                                   constraints_type_t<T>>,
+                  std::is_base_of<integer_printer, type_printer<field_type_t<T>>>> {
 
             static_assert(tuple_has<is_primary_key, constraints_type_t<T>>::value, "an unexpected type was passed");
         };
@@ -1589,6 +1698,7 @@ namespace sqlite_orm {
                                               check_if_is_template<unique_t>,
                                               check_if_is_template<default_t>,
                                               check_if_is_template<check_t>,
+                                              check_if_is_template<primary_key_with_autoincrement>,
                                               check_if_is_type<collate_constraint_t>,
 #if SQLITE_VERSION_NUMBER >= 3031000
                                               check_if<is_generated_always>,
@@ -1633,7 +1743,11 @@ namespace sqlite_orm {
         return {{}};
     }
 
-    inline internal::autoincrement_t autoincrement() {
+    /**
+     *  AUTOINCREMENT keyword. [Deprecation notice] Use `primary_key().autoincrement()` instead of using this function.
+     *  This function will be removed in 1.9
+     */
+    [[deprecated("Use primary_key().autoincrement()` instead")]] inline internal::autoincrement_t autoincrement() {
         return {};
     }
 
@@ -2176,7 +2290,7 @@ namespace sqlite_orm {
         /*
          *  Encapsulates a tuple of column constraints.
          *  
-         *  Op... is a constraints pack, e.g. primary_key_t, autoincrement_t etc
+         *  Op... is a constraints pack, e.g. primary_key_t, unique_t etc
          */
         template<class... Op>
         struct column_constraints {
@@ -6483,7 +6597,7 @@ namespace sqlite_orm {
      *  Example: storage.get_all<Employee>(group_by(&Employee::name), having(greater_than(count(&Employee::name), 2)));
      */
     template<class T>
-    internal::having_t<T> having(T expression) {
+    [[deprecated("Use group_by(...).having(...) instead")]] internal::having_t<T> having(T expression) {
         return {std::move(expression)};
     }
 }
@@ -9096,6 +9210,7 @@ namespace sqlite_orm {
 
 #include <type_traits>  //  std::true_type, std::false_type, std::remove_const, std::enable_if
 #include <tuple>
+#include <utility>  //  std::index_sequence
 
 // #include "functional/cxx_universal.h"
 
@@ -9148,30 +9263,35 @@ namespace sqlite_orm {
     namespace internal {
 
         /**
+         *   Indirect enabler for DBO, accepting an index to disambiguate non-unique DBOs
+         */
+        template<class Lookup, size_t Ix, class DBO>
+        struct enable_found_table : std::enable_if<lookup_type_matches<DBO, Lookup>::value, DBO> {};
+
+        /**
          *  SFINAE friendly facility to pick a table definition (`table_t`) from a tuple of database objects.
          *  
-         *  DBOs - db_objects_tuple type
          *  Lookup - mapped data type
+         *  Seq - index sequence matching the number of DBOs
+         *  DBOs - db_objects_tuple type
          */
-        template<class Lookup, class... DBO>
-        struct storage_pick_table : std::enable_if<lookup_type_matches<DBO, Lookup>::value, DBO>... {};
+        template<class Lookup, class Seq, class DBOs>
+        struct storage_pick_table;
 
-#ifndef SQLITE_ORM_BROKEN_VARIADIC_PACK_EXPANSION
-        template<class Lookup, class... DBO>
-        struct storage_pick_table<Lookup, db_objects_tuple<DBO...>> : storage_pick_table<Lookup, DBO...> {};
-#else
-        template<class Lookup, class... DBO>
-        struct storage_pick_table<Lookup, std::tuple<DBO...>> : storage_pick_table<Lookup, DBO...> {};
-#endif
+        template<class Lookup, size_t... Ix, class... DBO>
+        struct storage_pick_table<Lookup, std::index_sequence<Ix...>, db_objects_tuple<DBO...>>
+            : enable_found_table<Lookup, Ix, DBO>... {};
 
         /**
          *  SFINAE friendly facility to pick a table definition (`table_t`) from a tuple of database objects.
          *
-         *  DBOs - db_objects_tuple type, possibly const-qualified
          *  Lookup - 'table' type, mapped data type
+         *  DBOs - db_objects_tuple type, possibly const-qualified
          */
         template<class Lookup, class DBOs>
-        using storage_pick_table_t = typename storage_pick_table<Lookup, std::remove_const_t<DBOs>>::type;
+        using storage_pick_table_t = typename storage_pick_table<Lookup,
+                                                                 std::make_index_sequence<std::tuple_size<DBOs>::value>,
+                                                                 std::remove_const_t<DBOs>>::type;
 
         /**
          *  Find a table definition (`table_t`) from a tuple of database objects;
@@ -9180,16 +9300,8 @@ namespace sqlite_orm {
          *  DBOs - db_objects_tuple type
          *  Lookup - mapped data type
          */
-        template<class Lookup, class... DBO>
-        struct storage_find_table : polyfill::detected_or<polyfill::nonesuch, storage_pick_table_t, Lookup, DBO...> {};
-
-#ifndef SQLITE_ORM_BROKEN_VARIADIC_PACK_EXPANSION
-        template<class Lookup, class... DBO>
-        struct storage_find_table<Lookup, db_objects_tuple<DBO...>> : storage_find_table<Lookup, DBO...> {};
-#else
-        template<class Lookup, class... DBO>
-        struct storage_find_table<Lookup, std::tuple<DBO...>> : storage_find_table<Lookup, DBO...> {};
-#endif
+        template<class Lookup, class DBOs>
+        struct storage_find_table : polyfill::detected_or<polyfill::nonesuch, storage_pick_table_t, Lookup, DBOs> {};
 
         /**
          *  Find a table definition (`table_t`) from a tuple of database objects;
@@ -9201,14 +9313,20 @@ namespace sqlite_orm {
         template<class Lookup, class DBOs>
         using storage_find_table_t = typename storage_find_table<Lookup, std::remove_const_t<DBOs>>::type;
 
+#ifndef SQLITE_ORM_BROKEN_VARIADIC_PACK_EXPANSION
         template<class DBOs, class Lookup, class SFINAE = void>
-        SQLITE_ORM_INLINE_VAR constexpr bool is_mapped_v = false;
+        struct is_mapped : std::false_type {};
         template<class DBOs, class Lookup>
-        SQLITE_ORM_INLINE_VAR constexpr bool
-            is_mapped_v<DBOs, Lookup, polyfill::void_t<storage_pick_table_t<Lookup, DBOs>>> = true;
+        struct is_mapped<DBOs, Lookup, polyfill::void_t<storage_pick_table_t<Lookup, DBOs>>> : std::true_type {};
+#else
+        template<class DBOs, class Lookup, class SFINAE = storage_find_table_t<Lookup, DBOs>>
+        struct is_mapped : std::true_type {};
+        template<class DBOs, class Lookup>
+        struct is_mapped<DBOs, Lookup, polyfill::nonesuch> : std::false_type {};
+#endif
 
         template<class DBOs, class Lookup>
-        using is_mapped = polyfill::bool_constant<is_mapped_v<DBOs, Lookup>>;
+        SQLITE_ORM_INLINE_VAR constexpr bool is_mapped_v = is_mapped<DBOs, Lookup>::value;
     }
 }
 
@@ -9235,12 +9353,11 @@ namespace sqlite_orm {
         namespace storage_traits {
 
             /**
-             *  DBOs - db_objects_tuple type
-             *  T - mapped or unmapped data type
+             *  DBO - db object (table)
              */
-            template<class DBOs>
+            template<class DBO>
             struct storage_mapped_columns_impl
-                : tuple_transformer<filter_tuple_t<elements_type_t<DBOs>, is_column>, field_type_t> {};
+                : tuple_transformer<filter_tuple_t<elements_type_t<DBO>, is_column>, field_type_t> {};
 
             template<>
             struct storage_mapped_columns_impl<polyfill::nonesuch> {
@@ -9249,7 +9366,7 @@ namespace sqlite_orm {
 
             /**
              *  DBOs - db_objects_tuple type
-             *  T - mapped or unmapped data type
+             *  Lookup - mapped or unmapped data type
              */
             template<class DBOs, class Lookup>
             struct storage_mapped_columns : storage_mapped_columns_impl<storage_find_table_t<Lookup, DBOs>> {};
@@ -9865,60 +9982,7 @@ namespace sqlite_orm {
 
 // #include "functional/mpl.h"
 
-// #include "typed_comparator.h"
-
-// #include "tuple_helper/index_sequence_util.h"
-
-#include <type_traits>  //  std::index_sequence, std::make_index_sequence
-
-// #include "../functional/cxx_universal.h"
-
-#ifdef SQLITE_ORM_RELAXED_CONSTEXPR_SUPPORTED
-#include <array>
-#endif
-
-namespace sqlite_orm {
-    namespace internal {
-        /**
-         *  Get the first value of an index_sequence.
-         */
-        template<size_t I, size_t... Idx>
-        SQLITE_ORM_CONSTEVAL size_t first_index_sequence_value(std::index_sequence<I, Idx...>) {
-            return I;
-        }
-
-#ifdef SQLITE_ORM_RELAXED_CONSTEXPR_SUPPORTED
-        /**
-         *  Reorder the values of an index_sequence according to the positions from a second sequence.
-         */
-        template<size_t... Value, size_t... IdxOfValue>
-        SQLITE_ORM_CONSTEVAL auto reorder_index_sequence(std::index_sequence<Value...>,
-                                                         std::index_sequence<IdxOfValue...>) {
-            constexpr std::array<size_t, sizeof...(Value)> values{Value...};
-            return std::index_sequence<values[sizeof...(Value) - 1u - IdxOfValue]...>{};
-        }
-
-        template<size_t Value, size_t IdxOfValue>
-        SQLITE_ORM_CONSTEVAL std::index_sequence<Value> reorder_index_sequence(std::index_sequence<Value>,
-                                                                               std::index_sequence<IdxOfValue>) {
-            return {};
-        }
-
-        inline SQLITE_ORM_CONSTEVAL std::index_sequence<> reorder_index_sequence(std::index_sequence<>,
-                                                                                 std::index_sequence<>) {
-            return {};
-        }
-
-        /**
-         *  Reverse the values of an index_sequence.
-         */
-        template<size_t... Idx>
-        SQLITE_ORM_CONSTEVAL auto reverse_index_sequence(std::index_sequence<Idx...>) {
-            return reorder_index_sequence(std::index_sequence<Idx...>{}, std::make_index_sequence<sizeof...(Idx)>{});
-        }
-#endif
-    }
-}
+// #include "functional/index_sequence_util.h"
 
 // #include "tuple_helper/tuple_filter.h"
 
@@ -9936,7 +10000,7 @@ namespace sqlite_orm {
 
 // #include "../functional/cxx_functional_polyfill.h"
 
-// #include "index_sequence_util.h"
+// #include "../functional/index_sequence_util.h"
 
 namespace sqlite_orm {
     namespace internal {
@@ -10056,6 +10120,8 @@ namespace sqlite_orm {
 }
 
 // #include "member_traits/member_traits.h"
+
+// #include "typed_comparator.h"
 
 // #include "type_traits.h"
 
@@ -10211,7 +10277,7 @@ namespace sqlite_orm {
                               call_as_template_base<column_field>([&lambda](const auto& column) {
                                   lambda(column.member_pointer);
                               }));
-                this->for_each_primary_key([this, &lambda](auto& primaryKey) {
+                this->for_each_primary_key([&lambda](auto& primaryKey) {
                     iterate_tuple(primaryKey.columns, lambda);
                 });
             }
@@ -11024,6 +11090,12 @@ namespace sqlite_orm {
                 } else {
                     return {};
                 }
+            }
+#endif
+
+#ifdef SQLITE_ORM_STRING_VIEW_SUPPORTED
+            std::string_view column_name(int index) const {
+                return sqlite3_column_name(stmt, index);
             }
 #endif
         };
@@ -13906,7 +13978,6 @@ namespace sqlite_orm {
                     [](sqlite3_context* context, void* functionVoidPointer, int argsCount, sqlite3_value** values) {
                         auto& function = *static_cast<F*>(functionVoidPointer);
                         args_tuple argsTuple;
-                        using tuple_size = std::tuple_size<args_tuple>;
                         values_to_tuple{}(values, argsTuple, argsCount);
                         auto result = call(function, std::move(argsTuple));
                         statement_binder<return_type>().result(context, result);
@@ -13969,7 +14040,6 @@ namespace sqlite_orm {
                     [](sqlite3_context*, void* functionVoidPointer, int argsCount, sqlite3_value** values) {
                         auto& function = *static_cast<F*>(functionVoidPointer);
                         args_tuple argsTuple;
-                        using tuple_size = std::tuple_size<args_tuple>;
                         values_to_tuple{}(values, argsTuple, argsCount);
                         call(function, &F::step, move(argsTuple));
                     },
@@ -15690,18 +15760,63 @@ namespace sqlite_orm {
             }
         };
 
+        template<>
+        struct statement_serializer<conflict_clause_t, void> {
+            using statement_type = conflict_clause_t;
+
+            template<class Ctx>
+            std::string operator()(const statement_type& statement, const Ctx& context) const {
+                switch(statement) {
+                    case conflict_clause_t::rollback:
+                        return "ROLLBACK";
+                    case conflict_clause_t::abort:
+                        return "ABORT";
+                    case conflict_clause_t::fail:
+                        return "FAIL";
+                    case conflict_clause_t::ignore:
+                        return "IGNORE";
+                    case conflict_clause_t::replace:
+                        return "REPLACE";
+                }
+                return {};
+            }
+        };
+
+        template<class T>
+        struct statement_serializer<primary_key_with_autoincrement<T>, void> {
+            using statement_type = primary_key_with_autoincrement<T>;
+
+            template<class Ctx>
+            std::string operator()(const statement_type& statement, const Ctx& context) const {
+                return serialize(statement.primary_key, context) + " AUTOINCREMENT";
+            }
+        };
+
         template<class... Cs>
         struct statement_serializer<primary_key_t<Cs...>, void> {
             using statement_type = primary_key_t<Cs...>;
 
             template<class Ctx>
-            std::string operator()(const statement_type& c, const Ctx& context) const {
+            std::string operator()(const statement_type& statement, const Ctx& context) const {
                 std::stringstream ss;
-                ss << static_cast<std::string>(c);
+                ss << "PRIMARY KEY";
+                switch(statement.options.asc_option) {
+                    case statement_type::order_by::ascending:
+                        ss << " ASC";
+                        break;
+                    case statement_type::order_by::descending:
+                        ss << " DESC";
+                        break;
+                    default:
+                        break;
+                }
+                if(statement.options.conflict_clause_is_on) {
+                    ss << " ON CONFLICT " << serialize(statement.options.conflict_clause, context);
+                }
                 using columns_tuple = typename statement_type::columns_tuple;
                 const size_t columnsCount = std::tuple_size<columns_tuple>::value;
                 if(columnsCount) {
-                    ss << "(" << streaming_mapped_columns_expressions(c.columns, context) << ")";
+                    ss << "(" << streaming_mapped_columns_expressions(statement.columns, context) << ")";
                 }
                 return ss.str();
             }
@@ -18300,49 +18415,6 @@ namespace sqlite_orm {
                 return res;
             }
 #endif  // SQLITE_ORM_OPTIONAL_SUPPORTED
-
-            template<class O>
-            bool has_dependent_rows(const O& object) {
-                auto res = false;
-                iterate_tuple<true>(
-                    this->db_objects,
-                    tables_index_sequence<db_objects_type>{},
-                    [this, &object, &res](auto& table) {
-                        if(res) {
-                            return;
-                        }
-                        table.template for_each_foreign_key_to<O>([this, &table, &object, &res](auto& foreignKey) {
-                            std::stringstream ss;
-                            ss << "SELECT COUNT(*)"
-                               << " FROM " << streaming_identifier(table.name) << " WHERE ";
-                            iterate_tuple(foreignKey.columns, [&ss, &table, first = true](auto& colRef) mutable {
-                                auto* columnName = table.find_column_name(colRef);
-                                if(!columnName) {
-                                    throw std::system_error{orm_error_code::column_not_found};
-                                }
-
-                                constexpr std::array<const char*, 2> sep = {" AND ", ""};
-                                ss << sep[std::exchange(first, false)] << streaming_identifier(*columnName) << " = ?";
-                            });
-                            ss.flush();
-
-                            auto con = this->get_connection();
-                            sqlite3_stmt* stmt = prepare_stmt(con.get(), ss.str());
-                            statement_finalizer finalizer{stmt};
-
-                            auto& targetTable = this->get_table<O>();
-                            tuple_value_binder{stmt}(foreignKey.references,
-                                                     [&targetTable, &object](auto& memberPointer) {
-                                                         return targetTable.object_field_value(object, memberPointer);
-                                                     });
-                            perform_step<SQLITE_ROW>(stmt);
-                            auto countResult = sqlite3_column_int(stmt, 0);
-                            res = countResult > 0;
-                            perform_step(stmt);
-                        });
-                    });
-                return res;
-            }
         };  // struct storage_t
     }
 
@@ -18997,7 +19069,7 @@ namespace sqlite_orm {
 
 // #include "../functional/static_magic.h"
 
-// #include "../tuple_helper/index_sequence_util.h"
+// #include "../functional/index_sequence_util.h"
 
 // #include "../tuple_helper/tuple_filter.h"
 
@@ -19113,7 +19185,7 @@ namespace sqlite_orm {
         template<class Table, satisfies<is_table, Table>>
         sync_schema_result storage_t<DBO...>::sync_table(const Table& table, sqlite3* db, bool preserve) {
 #ifdef SQLITE_ENABLE_DBSTAT_VTAB
-            if(std::is_same<T, dbstat>::value) {
+            if(std::is_same<Table, dbstat>::value) {
                 return sync_schema_result::already_in_sync;
             }
 #endif  //  SQLITE_ENABLE_DBSTAT_VTAB
