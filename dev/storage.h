@@ -81,6 +81,9 @@ namespace sqlite_orm {
             storage_t(std::string filename, db_objects_type dbObjects) :
                 storage_base{move(filename), foreign_keys_count(dbObjects)}, db_objects{std::move(dbObjects)} {}
 
+            storage_t(std::shared_ptr<internal::connection_holder> connectionHolder, db_objects_type dbObjects) :
+                storage_base{move(connectionHolder), foreign_keys_count(dbObjects)}, db_objects{std::move(dbObjects)} {}
+
           private:
             db_objects_type db_objects;
 
@@ -135,7 +138,6 @@ namespace sqlite_orm {
                 perform_void_exec(db, ss.str());
             }
 #endif
-
             template<class Table>
             void drop_create_with_loss(sqlite3* db, const Table& table) {
                 // eliminated all transaction handling
@@ -262,7 +264,8 @@ namespace sqlite_orm {
 
             template<class S, class... Wargs>
             void update_all(S set, Wargs... wh) {
-                static_assert(internal::is_set<S>::value, "first argument in update_all can be either set or dynamic_set");
+                static_assert(internal::is_set<S>::value,
+                              "first argument in update_all can be either set or dynamic_set");
                 auto statement = this->prepare(sqlite_orm::update_all(std::move(set), std::forward<Wargs>(wh)...));
                 this->execute(statement);
             }
@@ -587,7 +590,7 @@ namespace sqlite_orm {
                 static_assert(is_preparable_v<self, Ex>, "Expression must be a high-level statement");
 
                 decltype(auto) e2 = static_if<is_select_v<Ex>>(
-                    [](auto expression) -> auto {
+                    [](auto expression) -> auto{
                         expression.highest_level = true;
                         return expression;
                     },
@@ -1043,8 +1046,7 @@ namespace sqlite_orm {
 #endif  // SQLITE_ORM_OPTIONAL_SUPPORTED
 
             template<class S, class... Wargs>
-            prepared_statement_t<update_all_t<S, Wargs...>>
-            prepare(update_all_t<S, Wargs...> upd) {
+            prepared_statement_t<update_all_t<S, Wargs...>> prepare(update_all_t<S, Wargs...> upd) {
                 return prepare_impl<update_all_t<S, Wargs...>>(std::move(upd));
             }
 

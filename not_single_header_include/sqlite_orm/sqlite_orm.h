@@ -36,4 +36,5 @@
 #include "../../dev/carray.h"
 #include "../../dev/dbstat.h"
 #include "../../dev/interface_definitions.h"
+#include "../../dev/connection_container.h"
 #include "../../dev/functional/finish_macros.h"

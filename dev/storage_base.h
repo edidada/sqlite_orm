@@ -29,10 +29,14 @@
 
 namespace sqlite_orm {
 
+    struct connection_container;
+
     namespace internal {
 
         struct storage_base {
             using collating_function = std::function<int(int, const void*, int, const void*)>;
+            using migration_t = std::function<void(const connection_container&)>;
+            using migration_key = std::pair<int, int>;
 
             std::function<void(sqlite3*)> on_open;
             pragma_t pragma;
@@ -505,14 +509,27 @@ namespace sqlite_orm {
                 }
             }
 
+            void register_migration(int from, int to, migration_t migration);
+
+            void migrate_to(int to);
+
           protected:
             storage_base(std::string filename, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
                 limit(std::bind(&storage_base::get_connection, this)),
-                inMemory(filename.empty() || filename == ":memory:"),
-                connection(std::make_unique<connection_holder>(move(filename))),
+                connection(std::make_shared<connection_holder>(move(filename))),
                 cachedForeignKeysCount(foreignKeysCount) {
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
+                    this->connection->retain();
+                    this->on_open_internal(this->connection->get());
+                }
+            }
+
+            storage_base(std::shared_ptr<internal::connection_holder> connectionHolder, int foreignKeysCount) :
+                pragma(std::bind(&storage_base::get_connection, this)),
+                limit(std::bind(&storage_base::get_connection, this)), connection(move(connectionHolder)),
+                cachedForeignKeysCount(foreignKeysCount) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -520,10 +537,10 @@ namespace sqlite_orm {
 
             storage_base(const storage_base& other) :
                 on_open(other.on_open), pragma(std::bind(&storage_base::get_connection, this)),
-                limit(std::bind(&storage_base::get_connection, this)), inMemory(other.inMemory),
-                connection(std::make_unique<connection_holder>(other.connection->filename)),
+                limit(std::bind(&storage_base::get_connection, this)),
+                connection(std::make_shared<connection_holder>(other.connection->filename)),
                 cachedForeignKeysCount(other.cachedForeignKeysCount) {
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->retain();
                     this->on_open_internal(this->connection->get());
                 }
@@ -533,7 +550,7 @@ namespace sqlite_orm {
                 if(this->isOpenedForever) {
                     this->connection->release();
                 }
-                if(this->inMemory) {
+                if(this->connection->inMemory) {
                     this->connection->release();
                 }
             }
@@ -777,14 +794,14 @@ namespace sqlite_orm {
                 return notEqual;
             }
 
-            const bool inMemory;
             bool isOpenedForever = false;
-            std::unique_ptr<connection_holder> connection;
+            std::shared_ptr<connection_holder> connection;
             std::map<std::string, collating_function> collatingFunctions;
             const int cachedForeignKeysCount;
             std::function<int(int)> _busy_handler;
             std::vector<std::unique_ptr<user_defined_function_base>> scalarFunctions;
             std::vector<std::unique_ptr<user_defined_function_base>> aggregateFunctions;
+            std::map<migration_key, migration_t> migrations;
         };
     }
 }

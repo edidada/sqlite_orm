@@ -63,15 +63,13 @@ TEST_CASE("update_all") {
         int id = 0;
         std::string name;
     };
-    auto storage = make_storage({},
-                                make_table("records",
-                                           make_column("id", &Record::id, primary_key()),
-                                           make_column("name", &Record::name)));
+    auto storage = make_storage(
+        {},
+        make_table("records", make_column("id", &Record::id, primary_key()), make_column("name", &Record::name)));
     storage.sync_schema();
-    auto vars = dynamic_set( storage );
+    auto vars = dynamic_set(storage);
     vars.push_back(assign(&Record::name, "Bob"));
     storage.update_all(vars, where(is_equal(&Record::id, 10)));
-
 }
 
 TEST_CASE("update set null") {
@@ -638,6 +636,120 @@ TEST_CASE("Explicit insert") {
                 REQUIRE_THROWS_WITH(storage.insert(visit3, columns(&Visit::id)),
                                     Contains("NOT NULL constraint failed"));
             }
+        }
+    }
+}
+
+TEST_CASE("migrations") {
+    using Catch::Matchers::UnorderedEquals;
+
+    auto filename = "db.sqlite";
+    ::remove(filename);
+
+    //  perform the first version
+    {
+        struct User {
+            int id = 0;
+            std::string name;
+
+#ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
+            User() = default;
+            User(int id, std::string name) : id{id}, name{move(name)} {}
+#endif
+
+            bool operator==(const User &user) const {
+                return this->id == user.id && this->name == user.name;
+            }
+        };
+
+        struct Visit {
+            int id = 0;
+        };
+
+        auto storage = make_storage(
+            filename,
+            make_table("users", make_column("id", &User::id, primary_key()), make_column("name", &User::name)),
+            make_table("visits", make_column("id", &Visit::id, primary_key())));
+        storage.sync_schema();
+
+        storage.replace(User{1, "Sertab Erener"});
+        storage.replace(User{2, "Inna"});
+
+        REQUIRE(storage.pragma.user_version() == 0);
+        REQUIRE(storage.count<User>() == 2);
+    }
+
+    //  let's move from 0 to 1: we'll split name to first name and last name by spaces
+    {
+        struct User {
+            int id = 0;
+            std::string firstName;
+            std::string lastName;
+
+#ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
+            User() = default;
+            User(int id, std::string firstName, std::string lastName) :
+                id{id}, firstName{move(firstName)}, lastName{move(lastName)} {}
+#endif
+
+            bool operator==(const User &other) const {
+                return this->id == other.id && this->firstName == other.firstName && this->lastName == other.lastName;
+            }
+        };
+        struct Visit {
+            int id = 0;
+        };
+
+        auto migrationCallsCount = 0;
+        auto storage = make_storage(filename,
+                                    make_table("users",
+                                               make_column("id", &User::id, primary_key()),
+                                               make_column("first_name", &User::firstName),
+                                               make_column("last_name", &User::lastName)),
+                                    make_table("visits", make_column("id", &Visit::id, primary_key())));
+        storage.register_migration(0, 1, [&storage, &migrationCallsCount](const connection_container &connection) {
+            ++migrationCallsCount;
+            struct OldUser {
+                int id = 0;
+                std::string name;
+            };
+            auto oldStorage =
+                connection.make_storage(make_table("users",
+                                                   make_column("id", &OldUser::id, primary_key()),
+                                                   make_column("name", &OldUser::name)),
+                                        make_table("visits", make_column("id", &Visit::id, primary_key())));
+            auto oldUsers = oldStorage.get_all<OldUser>();
+            storage.sync_schema();  //
+            for(auto &oldUser: oldUsers) {
+                User newUser;
+                newUser.id = oldUser.id;
+                auto spaceIndex = oldUser.name.find(' ');
+                if(spaceIndex != oldUser.name.npos) {
+                    newUser.firstName = oldUser.name.substr(0, spaceIndex);
+                    newUser.lastName = oldUser.name.substr(spaceIndex + 1, oldUser.name.length() - spaceIndex - 1);
+                } else {
+                    newUser.firstName = oldUser.name;
+                }
+                storage.replace(newUser);
+            }
+        });
+        storage.migrate_to(1);
+        {
+            auto allUsers = storage.get_all<User>();
+            decltype(allUsers) expectedUsers;
+            expectedUsers.push_back(User{1, "Sertab", "Erener"});
+            expectedUsers.push_back(User{2, "Inna", ""});
+            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
+            REQUIRE(migrationCallsCount == 1);
+        }
+        storage.migrate_to(1);
+        {
+            auto allUsers = storage.get_all<User>();
+            decltype(allUsers) expectedUsers;
+            expectedUsers.push_back(User{1, "Sertab", "Erener"});
+            expectedUsers.push_back(User{2, "Inna", ""});
+            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
+            REQUIRE(migrationCallsCount == 1);
         }
     }
 }
