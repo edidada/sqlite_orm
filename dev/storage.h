@@ -262,8 +262,10 @@ namespace sqlite_orm {
                 this->execute(statement);
             }
 
-            template<class... Args, class... Wargs>
-            void update_all(internal::set_t<Args...> set, Wargs... wh) {
+            template<class S, class... Wargs>
+            void update_all(S set, Wargs... wh) {
+                static_assert(internal::is_set<S>::value,
+                              "first argument in update_all can be either set or dynamic_set");
                 auto statement = this->prepare(sqlite_orm::update_all(std::move(set), std::forward<Wargs>(wh)...));
                 this->execute(statement);
             }
@@ -588,7 +590,7 @@ namespace sqlite_orm {
                 static_assert(is_preparable_v<self, Ex>, "Expression must be a high-level statement");
 
                 decltype(auto) e2 = static_if<is_select_v<Ex>>(
-                    [](auto expression) -> auto {
+                    [](auto expression) -> auto{
                         expression.highest_level = true;
                         return expression;
                     },
@@ -1043,10 +1045,9 @@ namespace sqlite_orm {
             }
 #endif  // SQLITE_ORM_OPTIONAL_SUPPORTED
 
-            template<class... Args, class... Wargs>
-            prepared_statement_t<update_all_t<set_t<Args...>, Wargs...>>
-            prepare(update_all_t<set_t<Args...>, Wargs...> upd) {
-                return prepare_impl<update_all_t<set_t<Args...>, Wargs...>>(std::move(upd));
+            template<class S, class... Wargs>
+            prepared_statement_t<update_all_t<S, Wargs...>> prepare(update_all_t<S, Wargs...> upd) {
+                return prepare_impl<update_all_t<S, Wargs...>>(std::move(upd));
             }
 
             template<class T, class... Args>
@@ -1346,13 +1347,11 @@ namespace sqlite_orm {
                 perform_step(stmt);
             }
 
-            template<class... Args, class... Wargs>
-            void execute(const prepared_statement_t<update_all_t<set_t<Args...>, Wargs...>>& statement) {
+            template<class S, class... Wargs>
+            void execute(const prepared_statement_t<update_all_t<S, Wargs...>>& statement) {
                 sqlite3_stmt* stmt = reset_stmt(statement.stmt);
                 conditional_binder bind_node{stmt};
-                iterate_tuple(statement.expression.set.assigns, [&bind_node](auto& setArg) {
-                    iterate_ast(setArg, bind_node);
-                });
+                iterate_ast(statement.expression.set, bind_node);
                 iterate_ast(statement.expression.conditions, bind_node);
                 perform_step(stmt);
             }
@@ -1421,54 +1420,6 @@ namespace sqlite_orm {
                 return res;
             }
 #endif  // SQLITE_ORM_OPTIONAL_SUPPORTED
-
-            template<class O>
-            bool has_dependent_rows(const O& object) {
-                auto res = false;
-                iterate_tuple<true>(
-                    this->db_objects,
-                    tables_index_sequence<db_objects_type>{},
-                    [this, &object, &res](auto& table) {
-                        if(res) {
-                            return;
-                        }
-                        table.template for_each_foreign_key_to<O>([this, &table, &object, &res](auto& foreignKey) {
-                            std::stringstream sss;
-                            sss << "SELECT COUNT(*)"
-                                << " FROM " << streaming_identifier(table.name) << " WHERE ";
-                            iterate_tuple(foreignKey.columns,
-                                          std::bind(
-                                              [&table, first = true](auto& colRef, auto& sss) mutable {
-                                                  auto* columnName = table.find_column_name(colRef);
-                                                  if(!columnName) {
-                                                      throw std::system_error{orm_error_code::column_not_found};
-                                                  }
-
-                                                  constexpr std::array<const char*, 2> sep = {" AND ", ""};
-                                                  sss << sep[std::exchange(first, false)]
-                                                      << streaming_identifier(*columnName) << " = ?";
-                                              },
-                                              std::placeholders::_1,
-                                              std::ref(sss)));
-                            sss.flush();
-
-                            auto con = this->get_connection();
-                            sqlite3_stmt* stmt = prepare_stmt(con.get(), sss.str());
-                            statement_finalizer finalizer{stmt};
-
-                            auto& targetTable = this->get_table<O>();
-                            tuple_value_binder{stmt}(foreignKey.references,
-                                                     [&targetTable, &object](auto& memberPointer) {
-                                                         return targetTable.object_field_value(object, memberPointer);
-                                                     });
-                            perform_step<SQLITE_ROW>(stmt);
-                            auto countResult = sqlite3_column_int(stmt, 0);
-                            res = countResult > 0;
-                            perform_step(stmt);
-                        });
-                    });
-                return res;
-            }
         };  // struct storage_t
     }
 

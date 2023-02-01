@@ -58,6 +58,20 @@ TEST_CASE("explicit from") {
     REQUIRE(expected == rows);
 }
 
+TEST_CASE("update_all") {
+    struct Record {
+        int id = 0;
+        std::string name;
+    };
+    auto storage = make_storage(
+        {},
+        make_table("records", make_column("id", &Record::id, primary_key()), make_column("name", &Record::name)));
+    storage.sync_schema();
+    auto vars = dynamic_set(storage);
+    vars.push_back(assign(&Record::name, "Bob"));
+    storage.update_all(vars, where(is_equal(&Record::id, 10)));
+}
+
 TEST_CASE("update set null") {
 
     struct User {
@@ -282,7 +296,7 @@ TEST_CASE("Select") {
 
     auto storage = make_storage(dbFileName,
                                 make_table("WORDS",
-                                           make_column("ID", &Word::id, primary_key(), autoincrement()),
+                                           make_column("ID", &Word::id, primary_key().autoincrement()),
                                            make_column("CURRENT_WORD", &Word::currentWord),
                                            make_column("BEFORE_WORD", &Word::beforeWord),
                                            make_column("AFTER_WORD", &Word::afterWord),
