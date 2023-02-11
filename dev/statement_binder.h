@@ -240,7 +240,7 @@ namespace sqlite_orm {
     template<>
     struct statement_binder<std::vector<char>, void> {
         int bind(sqlite3_stmt* stmt, int index, const std::vector<char>& value) const {
-            if(value.size()) {
+            if(!value.empty()) {
                 return sqlite3_bind_blob(stmt, index, (const void*)&value.front(), int(value.size()), SQLITE_TRANSIENT);
             } else {
                 return sqlite3_bind_blob(stmt, index, "", 0, SQLITE_TRANSIENT);
@@ -248,7 +248,7 @@ namespace sqlite_orm {
         }
 
         void result(sqlite3_context* context, const std::vector<char>& value) const {
-            if(value.size()) {
+            if(!value.empty()) {
                 sqlite3_result_blob(context, (const void*)&value.front(), int(value.size()), nullptr);
             } else {
                 sqlite3_result_blob(context, "", 0, nullptr);
@@ -282,10 +282,10 @@ namespace sqlite_orm {
             explicit conditional_binder(sqlite3_stmt* stmt) : stmt{stmt} {}
 
             template<class T, satisfies<is_bindable, T> = true>
-            void operator()(const T& t) {
-                int rc = statement_binder<T>{}.bind(this->stmt, this->index++, t);
+            void operator()(const T& value) {
+                const int rc = statement_binder<T>{}.bind(this->stmt, this->index++, value);
                 if(SQLITE_OK != rc) {
-                    throw_translated_sqlite_error(stmt);
+                    throw_translated_sqlite_error(this->stmt);
                 }
             }
 

@@ -247,7 +247,7 @@ namespace sqlite_orm {
                                                ? -1
                                                : int(std::tuple_size<args_tuple>::value);
                 this->scalarFunctions.emplace_back(new user_defined_scalar_function_t{
-                    move(name),
+                    std::move(name),
                     argsCount,
                     []() -> int* {
                         return (int*)(new F());
@@ -308,7 +308,7 @@ namespace sqlite_orm {
                                                ? -1
                                                : int(std::tuple_size<args_tuple>::value);
                 this->aggregateFunctions.emplace_back(new user_defined_aggregate_function_t{
-                    move(name),
+                    std::move(name),
                     argsCount,
                     /* create = */
                     []() -> int* {
@@ -319,7 +319,7 @@ namespace sqlite_orm {
                         auto& function = *static_cast<F*>(functionVoidPointer);
                         args_tuple argsTuple;
                         values_to_tuple{}(values, argsTuple, argsCount);
-                        call(function, &F::step, move(argsTuple));
+                        call(function, &F::step, std::move(argsTuple));
                     },
                     /* finalCall = */
                     [](sqlite3_context* context, void* functionVoidPointer) {
@@ -368,7 +368,7 @@ namespace sqlite_orm {
                 };
                 std::stringstream ss;
                 ss << C::name() << std::flush;
-                this->create_collation(ss.str(), move(func));
+                this->create_collation(ss.str(), std::move(func));
             }
 
             void create_collation(const std::string& name, collating_function f) {
@@ -458,7 +458,7 @@ namespace sqlite_orm {
             backup_t make_backup_to(const std::string& filename) {
                 auto holder = std::make_unique<connection_holder>(filename);
                 connection_ref conRef{*holder};
-                return {conRef, "main", this->get_connection(), "main", move(holder)};
+                return {conRef, "main", this->get_connection(), "main", std::move(holder)};
             }
 
             backup_t make_backup_to(storage_base& other) {
@@ -468,7 +468,7 @@ namespace sqlite_orm {
             backup_t make_backup_from(const std::string& filename) {
                 auto holder = std::make_unique<connection_holder>(filename);
                 connection_ref conRef{*holder};
-                return {this->get_connection(), "main", conRef, "main", move(holder)};
+                return {this->get_connection(), "main", conRef, "main", std::move(holder)};
             }
 
             backup_t make_backup_from(storage_base& other) {
@@ -497,7 +497,7 @@ namespace sqlite_orm {
             }
 
             int busy_handler(std::function<int(int)> handler) {
-                _busy_handler = move(handler);
+                _busy_handler = std::move(handler);
                 if(this->is_opened()) {
                     if(_busy_handler) {
                         return sqlite3_busy_handler(this->connection->get(), busy_handler_callback, this);
@@ -517,7 +517,7 @@ namespace sqlite_orm {
             storage_base(std::string filename, int foreignKeysCount) :
                 pragma(std::bind(&storage_base::get_connection, this)),
                 limit(std::bind(&storage_base::get_connection, this)),
-                connection(std::make_shared<connection_holder>(move(filename))),
+                connection(std::make_shared<connection_holder>(std::move(filename))),
                 cachedForeignKeysCount(foreignKeysCount) {
                 if(this->connection->inMemory) {
                     this->connection->retain();
