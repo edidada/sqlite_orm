@@ -1,5 +1,7 @@
 #include <sqlite_orm/sqlite_orm.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
+
+#include <typeindex>  //  std::type_index
 
 using namespace sqlite_orm;
 
@@ -10,7 +12,7 @@ TEST_CASE("ast_iterator") {
     };
     std::vector<std::type_index> typeIndexes;
     decltype(typeIndexes) expected;
-    auto lambda = [&typeIndexes](auto &value) {
+    auto lambda = [&typeIndexes](auto& value) {
         typeIndexes.push_back(typeid(value));
     };
     SECTION("bindables") {
@@ -169,7 +171,7 @@ TEST_CASE("ast_iterator") {
         }
         SECTION("bindable") {
             auto node = order_by("");
-            expected.push_back(typeid(const char *));
+            expected.push_back(typeid(const char*));
             internal::iterate_ast(node, lambda);
         }
         SECTION("positional ordinal") {

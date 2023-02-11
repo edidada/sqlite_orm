@@ -5,8 +5,10 @@
 #include <vector>  //  std::vector
 #include <sstream>  //  std::stringstream
 #include <type_traits>  //  std::false_type, std::true_type
+#include <ostream>  //  std::ostream
+#include <functional>  //  std::function
 
-#include "table_name_collector.h"
+#include "../table_name_collector.h"
 
 namespace sqlite_orm {
 
@@ -14,6 +16,8 @@ namespace sqlite_orm {
 
         template<class T, class L>
         void iterate_ast(const T& t, L&& lambda);
+
+        struct conditional_binder;
 
         template<class... Args>
         struct set_t {
@@ -29,8 +33,20 @@ namespace sqlite_orm {
         struct is_set<set_t<Args...>> : std::true_type {};
 
         struct dynamic_set_entry {
+            using bind_t = std::function<void(conditional_binder&)>;
+
             std::string serialized_value;
+            bind_t bind;
+
+#ifndef SQLITE_ORM_AGGREGATE_PAREN_INIT_SUPPORTED
+            dynamic_set_entry(std::string serialized_value, bind_t bind) :
+                serialized_value{std::move(serialized_value)}, bind{std::move(bind)} {}
+#endif
         };
+
+        inline std::ostream& operator<<(std::ostream& os, const dynamic_set_entry& entry) {
+            return os << entry.serialized_value;
+        }
 
         template<class C>
         struct dynamic_set_t {
@@ -38,43 +54,12 @@ namespace sqlite_orm {
             using entry_t = dynamic_set_entry;
             using const_iterator = typename std::vector<entry_t>::const_iterator;
 
-            dynamic_set_t(const context_t& context_) :
-                context(context_), collector([this](const std::type_index& ti) {
-                    return find_table_name(this->context.db_objects, ti);
-                }) {}
+            dynamic_set_t(const context_t& context_) : context(context_), collector(this->context.db_objects) {}
 
-            dynamic_set_t(const dynamic_set_t& other) :
-                entries(other.entries), context(other.context), collector([this](const std::type_index& ti) {
-                    return find_table_name(this->context.db_objects, ti);
-                }) {
-                collector.table_names = other.collector.table_names;
-            }
-
-            dynamic_set_t(dynamic_set_t&& other) :
-                entries(move(other.entries)), context(std::move(other.context)),
-                collector([this](const std::type_index& ti) {
-                    return find_table_name(this->context.db_objects, ti);
-                }) {
-                collector.table_names = move(other.collector.table_names);
-            }
-
-            dynamic_set_t& operator=(const dynamic_set_t& other) {
-                this->entries = other.entries;
-                this->context = other.context;
-                this->collector = table_name_collector([this](const std::type_index& ti) {
-                    return find_table_name(this->context.db_objects, ti);
-                });
-                this->collector.table_names = other.collector.table_names;
-            }
-
-            dynamic_set_t& operator=(dynamic_set_t&& other) {
-                this->entries = move(other.entries);
-                this->context = std::move(other.context);
-                this->collector = table_name_collector([this](const std::type_index& ti) {
-                    return find_table_name(this->context.db_objects, ti);
-                });
-                this->collector.table_names = move(other.collector.table_names);
-            }
+            dynamic_set_t(const dynamic_set_t& other) = default;
+            dynamic_set_t(dynamic_set_t&& other) = default;
+            dynamic_set_t& operator=(const dynamic_set_t& other) = default;
+            dynamic_set_t& operator=(dynamic_set_t&& other) = default;
 
             template<class L, class R>
             void push_back(assign_t<L, R> assign) {
@@ -82,9 +67,10 @@ namespace sqlite_orm {
                 newContext.skip_table_name = true;
                 iterate_ast(assign, this->collector);
                 std::stringstream ss;
-                ss << serialize(assign.lhs, newContext) << ' ' << assign.serialize() << ' '
-                   << serialize(assign.rhs, context);
-                this->entries.push_back({ss.str()});
+                ss << serialize(assign.lhs, newContext) << ' ' << assign.serialize() << " ?";
+                this->entries.emplace_back(ss.str(), [assign = std::move(assign)](conditional_binder& binder) {
+                    iterate_ast(assign, binder);
+                });
             }
 
             const_iterator begin() const {
@@ -95,6 +81,10 @@ namespace sqlite_orm {
                 return this->entries.end();
             }
 
+            size_t size() const {
+                return this->entries.size();
+            }
+
             void clear() {
                 this->entries.clear();
                 this->collector.table_names.clear();
@@ -102,7 +92,7 @@ namespace sqlite_orm {
 
             std::vector<entry_t> entries;
             context_t context;
-            table_name_collector collector;
+            table_name_collector<typename context_t::db_objects_type> collector;
         };
 
         template<class C>

@@ -11,6 +11,7 @@
 #include <memory>
 #include <array>
 #include "functional/cxx_string_view.h"
+#include "functional/cxx_optional.h"
 
 #include "functional/cxx_universal.h"
 #include "functional/cxx_functional_polyfill.h"
@@ -135,7 +136,7 @@ namespace sqlite_orm {
          *  Serializer for literal values.
          */
         template<class T>
-        struct statement_serializer<T, internal::match_specialization_of<T, literal_holder>> {
+        struct statement_serializer<T, match_specialization_of<T, literal_holder>> {
             using statement_type = T;
 
             template<class Ctx>
@@ -767,8 +768,9 @@ namespace sqlite_orm {
             template<class Ctx>
             std::string operator()(const statement_type& statement, const Ctx& context) const {
                 std::stringstream ss;
-                ss << "EXISTS ";
-                ss << serialize(statement.expression, context);
+                auto newContext = context;
+                newContext.use_parentheses = true;
+                ss << "EXISTS " << serialize(statement.expression, newContext);
                 return ss.str();
             }
         };
@@ -788,7 +790,7 @@ namespace sqlite_orm {
             using statement_type = conflict_clause_t;
 
             template<class Ctx>
-            std::string operator()(const statement_type& statement, const Ctx& context) const {
+            std::string operator()(const statement_type& statement, const Ctx&) const {
                 switch(statement) {
                     case conflict_clause_t::rollback:
                         return "ROLLBACK";
@@ -1075,17 +1077,9 @@ namespace sqlite_orm {
             using statement_type = dynamic_set_t<C>;
 
             template<class Ctx>
-            std::string operator()(const statement_type& statement, const Ctx& context) const {
+            std::string operator()(const statement_type& statement, const Ctx&) const {
                 std::stringstream ss;
-                ss << "SET ";
-                int index = 0;
-                for(const dynamic_set_entry& entry: statement) {
-                    if(index > 0) {
-                        ss << ", ";
-                    }
-                    ss << entry.serialized_value;
-                    ++index;
-                }
+                ss << "SET " << streaming_serialized(statement);
                 return ss.str();
             }
         };
@@ -1109,40 +1103,30 @@ namespace sqlite_orm {
             }
         };
 
-        template<class S>
-        struct table_name_collector_holder;
-
-        template<class... Args>
-        struct table_name_collector_holder<set_t<Args...>> {
-
-            table_name_collector_holder(table_name_collector::find_table_name_t find_table_name) :
-                collector(move(find_table_name)) {}
-
-            table_name_collector collector;
-        };
-
-        template<class C>
-        struct table_name_collector_holder<dynamic_set_t<C>> {
-
-            table_name_collector_holder(const table_name_collector& collector) : collector(collector) {}
-
-            const table_name_collector& collector;
-        };
-
         template<class Ctx, class... Args>
-        table_name_collector_holder<set_t<Args...>> make_table_name_collector_holder(const set_t<Args...>& set,
-                                                                                     const Ctx& context) {
-            table_name_collector_holder<set_t<Args...>> holder([&context](const std::type_index& ti) {
-                return find_table_name(context.db_objects, ti);
-            });
-            iterate_ast(set, holder.collector);
-            return holder;
+        std::set<std::pair<std::string, std::string>> collect_table_names(const set_t<Args...>& set, const Ctx& ctx) {
+            auto collector = make_table_name_collector(ctx.db_objects);
+            iterate_ast(set, collector);
+            return std::move(collector.table_names);
         }
 
-        template<class C, class Ctx>
-        table_name_collector_holder<dynamic_set_t<C>> make_table_name_collector_holder(const dynamic_set_t<C>& set,
-                                                                                       const Ctx&) {
-            return {set.collector};
+        template<class Ctx, class C>
+        const std::set<std::pair<std::string, std::string>>& collect_table_names(const dynamic_set_t<C>& set,
+                                                                                 const Ctx&) {
+            return set.collector.table_names;
+        }
+
+        template<class Ctx, class T, satisfies<is_select, T> = true>
+        std::set<std::pair<std::string, std::string>> collect_table_names(const T& sel, const Ctx& ctx) {
+            auto collector = make_table_name_collector(ctx.db_objects);
+            iterate_ast(sel.col, collector);
+            iterate_ast(sel.conditions, collector);
+            return std::move(collector.table_names);
+        }
+
+        template<class Ctx, class T, satisfies<is_table, T> = true>
+        std::set<std::pair<std::string, std::string>> collect_table_names(const T& table, const Ctx&) {
+            return {{table.name, ""}};
         }
 
         template<class S, class... Wargs>
@@ -1151,19 +1135,15 @@ namespace sqlite_orm {
 
             template<class Ctx>
             std::string operator()(const statement_type& statement, const Ctx& context) const {
-                std::string tableName;
-
-                auto collectorHolder = make_table_name_collector_holder(statement.set, context);
-                const table_name_collector& collector = collectorHolder.collector;
-                if(collector.table_names.empty()) {
+                const auto& tableNames = collect_table_names(statement.set, context);
+                if(tableNames.empty()) {
                     throw std::system_error{orm_error_code::no_tables_specified};
                 }
-                tableName = collector.table_names.begin()->first;
+                const std::string& tableName = tableNames.begin()->first;
 
                 std::stringstream ss;
-                ss << "UPDATE " << streaming_identifier(tableName);
-                ss << ' ' << serialize(statement.set, context);
-                ss << streaming_conditions_tuple(statement.conditions, context);
+                ss << "UPDATE " << streaming_identifier(tableName) << ' ' << serialize(statement.set, context)
+                   << streaming_conditions_tuple(statement.conditions, context);
                 return ss.str();
             }
         };
@@ -1374,17 +1354,12 @@ namespace sqlite_orm {
         std::string serialize_get_all_impl(const T& get, const Ctx& context) {
             using primary_type = type_t<T>;
 
-            table_name_collector collector;
-            collector.table_names.emplace(lookup_table_name<primary_type>(context.db_objects), "");
-            // note: not collecting table names from get.conditions;
-
             auto& table = pick_table<primary_type>(context.db_objects);
+            auto tableNames = collect_table_names(table, context);
+
             std::stringstream ss;
-            ss << "SELECT " << streaming_table_column_names(table, true);
-            if(!collector.table_names.empty()) {
-                ss << " FROM " << streaming_identifiers(collector.table_names);
-            }
-            ss << streaming_conditions_tuple(get.conditions, context);
+            ss << "SELECT " << streaming_table_column_names(table, true) << " FROM "
+               << streaming_identifiers(tableNames) << streaming_conditions_tuple(get.conditions, context);
             return ss.str();
         }
 
@@ -1523,24 +1498,20 @@ namespace sqlite_orm {
                     ss << static_cast<std::string>(distinct(0)) << " ";
                 }
                 ss << streaming_serialized(get_column_names(sel.col, context));
-                table_name_collector collector([&context](const std::type_index& ti) {
-                    return find_table_name(context.db_objects, ti);
-                });
                 constexpr bool explicitFromItemsCount = count_tuple<std::tuple<Args...>, is_from>::value;
                 if(!explicitFromItemsCount) {
-                    iterate_ast(sel.col, collector);
-                    iterate_ast(sel.conditions, collector);
-                    join_iterator<Args...>()([&collector, &context](const auto& c) {
+                    auto tableNames = collect_table_names(sel, context);
+                    join_iterator<Args...>()([&tableNames, &context](const auto& c) {
                         using original_join_type = typename std::decay_t<decltype(c)>::join_type::type;
                         using cross_join_type = mapped_type_proxy_t<original_join_type>;
                         auto crossJoinedTableName = lookup_table_name<cross_join_type>(context.db_objects);
                         auto tableAliasString = alias_extractor<original_join_type>::get();
                         std::pair<std::string, std::string> tableNameWithAlias{std::move(crossJoinedTableName),
                                                                                std::move(tableAliasString)};
-                        collector.table_names.erase(tableNameWithAlias);
+                        tableNames.erase(tableNameWithAlias);
                     });
-                    if(!collector.table_names.empty() && !isCompoundOperator) {
-                        ss << " FROM " << streaming_identifiers(collector.table_names);
+                    if(!tableNames.empty() && !isCompoundOperator) {
+                        ss << " FROM " << streaming_identifiers(tableNames);
                     }
                 }
                 ss << streaming_conditions_tuple(sel.conditions, context);

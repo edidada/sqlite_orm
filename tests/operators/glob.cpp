@@ -2,7 +2,7 @@
  *  Obtained from here https://www.tutlane.com/tutorial/sqlite/sqlite-glob-operator
  */
 #include <sqlite_orm/sqlite_orm.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <vector>  //  std::vector
 #include <algorithm>  //  std::find_if, std::count
 
@@ -19,7 +19,7 @@ namespace {
 #ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
         Employee() = default;
         Employee(int id, std::string firstName, std::string lastName, float salary, int deptId) :
-            id{id}, firstName{move(firstName)}, lastName{move(lastName)}, salary{salary}, deptId{deptId} {}
+            id{id}, firstName{std::move(firstName)}, lastName{std::move(lastName)}, salary{salary}, deptId{deptId} {}
 #endif
     };
 }

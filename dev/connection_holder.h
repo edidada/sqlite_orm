@@ -13,7 +13,7 @@ namespace sqlite_orm {
         struct connection_holder {
 
             connection_holder(std::string filename_) :
-                inMemory(filename_.empty() || filename_ == ":memory:"), filename(move(filename_)) {}
+                inMemory(filename_.empty() || filename_ == ":memory:"), filename(std::move(filename_)) {}
 
             void retain() {
                 if(1 == ++this->_retain_count) {

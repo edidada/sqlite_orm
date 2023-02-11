@@ -1,6 +1,6 @@
 #include <sqlite_orm/sqlite_orm.h>
 #include <iostream>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 using namespace sqlite_orm;
 
@@ -9,7 +9,7 @@ TEST_CASE("Issue 343") {
       public:
         A() = default;
 
-        A(int id_, std::string name_) : name(move(name_)), id(id_) {}
+        A(int id_, std::string name_) : name(std::move(name_)), id(id_) {}
 
         int getId() const {
             return this->id;

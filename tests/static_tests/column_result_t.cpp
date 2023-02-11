@@ -1,5 +1,5 @@
 #include <sqlite_orm/sqlite_orm.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <type_traits>  //  std::is_same
 
 using namespace sqlite_orm;
@@ -26,10 +26,10 @@ TEST_CASE("column_result_t") {
         }
 
         void setComment(std::string comment) {
-            this->comment = move(comment);
+            this->comment = std::move(comment);
         }
 
-        const std::string &getComment() const {
+        const std::string& getComment() const {
             return this->comment;
         }
 

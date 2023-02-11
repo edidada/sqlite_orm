@@ -1,10 +1,10 @@
 #include <sqlite_orm/sqlite_orm.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 using namespace sqlite_orm;
 
 TEST_CASE("Unique") {
-    using Catch::Matchers::Contains;
+    using Catch::Matchers::ContainsSubstring;
 
     struct Contact {
         int id = 0;
@@ -15,7 +15,7 @@ TEST_CASE("Unique") {
 #ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
         Contact() = default;
         Contact(int id, std::string firstName, std::string lastName, std::string email) :
-            id{id}, firstName{move(firstName)}, lastName{move(lastName)}, email{move(email)} {}
+            id{id}, firstName{std::move(firstName)}, lastName{std::move(lastName)}, email{std::move(email)} {}
 #endif
     };
     struct Shape {
@@ -26,7 +26,7 @@ TEST_CASE("Unique") {
 #ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
         Shape() = default;
         Shape(int id, std::string backgroundColor, std::string foregroundColor) :
-            id{id}, backgroundColor{move(backgroundColor)}, foregroundColor{move(foregroundColor)} {}
+            id{id}, backgroundColor{std::move(backgroundColor)}, foregroundColor{std::move(foregroundColor)} {}
 #endif
     };
     struct List {
@@ -35,7 +35,7 @@ TEST_CASE("Unique") {
 
 #ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
         List() = default;
-        List(int id, decltype(email) email) : id{id}, email{move(email)} {}
+        List(int id, decltype(email) email) : id{id}, email{std::move(email)} {}
 #endif
     };
 
@@ -57,11 +57,11 @@ TEST_CASE("Unique") {
     storage.insert(Contact{0, "John", "Doe", "john.doe@gmail.com"});
 
     REQUIRE_THROWS_WITH(storage.insert(Contact{0, "Johnny", "Doe", "john.doe@gmail.com"}),
-                        Contains("constraint failed"));
+                        ContainsSubstring("constraint failed"));
 
     storage.insert(Shape{0, "red", "green"});
     storage.insert(Shape{0, "red", "blue"});
-    REQUIRE_THROWS_WITH(storage.insert(Shape{0, "red", "green"}), Contains("constraint failed"));
+    REQUIRE_THROWS_WITH(storage.insert(Shape{0, "red", "green"}), ContainsSubstring("constraint failed"));
 
     std::vector<List> lists(2);
     REQUIRE_NOTHROW(storage.insert_range(lists.begin(), lists.end()));

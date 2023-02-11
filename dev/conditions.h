@@ -426,7 +426,7 @@ namespace sqlite_orm {
             order_by_base() = default;
 
             order_by_base(decltype(asc_desc) asc_desc_, decltype(_collate_argument) _collate_argument_) :
-                asc_desc(asc_desc_), _collate_argument(move(_collate_argument_)) {}
+                asc_desc(asc_desc_), _collate_argument(std::move(_collate_argument_)) {}
 #endif
         };
 
@@ -508,7 +508,7 @@ namespace sqlite_orm {
             std::string name;
 
             dynamic_order_by_entry_t(decltype(name) name_, int asc_desc_, std::string collate_argument_) :
-                order_by_base{asc_desc_, move(collate_argument_)}, name(move(name_)) {}
+                order_by_base{asc_desc_, std::move(collate_argument_)}, name(std::move(name_)) {}
         };
 
         /**
@@ -527,7 +527,9 @@ namespace sqlite_orm {
                 auto newContext = this->context;
                 newContext.skip_table_name = true;
                 auto columnName = serialize(order_by.expression, newContext);
-                this->entries.emplace_back(move(columnName), order_by.asc_desc, move(order_by._collate_argument));
+                this->entries.emplace_back(std::move(columnName),
+                                           order_by.asc_desc,
+                                           std::move(order_by._collate_argument));
             }
 
             const_iterator begin() const {
@@ -894,6 +896,16 @@ namespace sqlite_orm {
     template<class L, class R>
     internal::conc_t<L, R> operator||(internal::expression_t<L> l, internal::expression_t<R> r) {
         return {std::move(l.value), std::move(r.value)};
+    }
+
+    template<class R, class E, internal::satisfies<std::is_base_of, internal::conc_string, E> = true>
+    internal::conc_t<E, R> operator||(E expr, R r) {
+        return {std::move(expr), std::move(r)};
+    }
+
+    template<class L, class E, internal::satisfies<std::is_base_of, internal::conc_string, E> = true>
+    internal::conc_t<L, E> operator||(L l, E expr) {
+        return {std::move(l), std::move(expr)};
     }
 
     template<class T, class R>

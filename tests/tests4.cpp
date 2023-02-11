@@ -1,5 +1,5 @@
 #include <sqlite_orm/sqlite_orm.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <algorithm>  //  std::count_if
 #ifdef SQLITE_ORM_OPTIONAL_SUPPORTED
 #include <optional>  // std::optional
@@ -29,7 +29,7 @@ TEST_CASE("Unique ptr in update") {
     }
     {
         std::unique_ptr<std::string> ptr;
-        storage.update_all(set(assign(&User::name, move(ptr))));
+        storage.update_all(set(assign(&User::name, std::move(ptr))));
         REQUIRE(storage.count<User>(where(is_not_null(&User::name))) == 0);
     }
 }
@@ -77,7 +77,7 @@ TEST_CASE("join") {
 
 #ifndef SQLITE_ORM_AGGREGATE_NSDMI_SUPPORTED
         User() = default;
-        User(int id, std::string name) : id{id}, name{move(name)} {}
+        User(int id, std::string name) : id{id}, name{std::move(name)} {}
 #endif
     };
 

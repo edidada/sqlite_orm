@@ -23,14 +23,23 @@ namespace sqlite_orm {
 
     namespace internal {
 
+        struct conditional_binder;
+
         /**
          *  ast_iterator accepts any expression and a callable object
          *  which will be called for any node of provided expression.
          *  E.g. if we pass `where(is_equal(5, max(&User::id, 10))` then
          *  callable object will be called with 5, &User::id and 10.
-         *  ast_iterator is used mostly in finding literals to be bound to
-         *  a statement. To use it just call `iterate_ast(object, callable);`
-         *  T is an ast element. E.g. where_t
+         *  ast_iterator is used in finding literals to be bound to
+         *  a statement, and to collect table names.
+         *  
+         *  Note that not all leaves of the expression tree are always visited:
+         *  Column expressions can be more complex, but are passed as a whole to the callable.
+         *  Examples are `column_pointer<>` and `alias_column_t<>`.
+         *  
+         *  To use `ast_iterator` call `iterate_ast(object, callable);`
+         *  
+         *  `T` is an ast element, e.g. where_t
          */
         template<class T, class SFINAE = void>
         struct ast_iterator {
@@ -314,6 +323,12 @@ namespace sqlite_orm {
             template<class L>
             void operator()(const node_type& node, L& lambda) const {
                 iterate_ast(node.entries, lambda);
+            }
+
+            void operator()(const node_type& node, conditional_binder& binder) const {
+                for(const dynamic_set_entry& entry: node) {
+                    entry.bind(binder);
+                }
             }
         };
 
