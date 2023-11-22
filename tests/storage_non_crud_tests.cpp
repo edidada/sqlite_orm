@@ -740,8 +740,8 @@ TEST_CASE("migrations") {
             decltype(allUsers) expectedUsers;
             expectedUsers.push_back(User{1, "Sertab", "Erener"});
             expectedUsers.push_back(User{2, "Inna", ""});
-//            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
-//            REQUIRE(migrationCallsCount == 1);
+            //            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
+            //            REQUIRE(migrationCallsCount == 1);
         }
         storage.migrate_to(1);
         {
@@ -749,8 +749,8 @@ TEST_CASE("migrations") {
             decltype(allUsers) expectedUsers;
             expectedUsers.push_back(User{1, "Sertab", "Erener"});
             expectedUsers.push_back(User{2, "Inna", ""});
-//            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
-//            REQUIRE(migrationCallsCount == 1);
+            //            REQUIRE_THAT(allUsers, UnorderedEquals(expectedUsers));
+            //            REQUIRE(migrationCallsCount == 1);
         }
     }
 }
