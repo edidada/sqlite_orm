@@ -1,7 +1,8 @@
 cmake_minimum_required (VERSION 3.16)
 
 # note: find_package(SQLite3 REQUIRED) already done in top-level CMakeLists
-
+project(orm_example)
+include_directories(/usr/local/include)
 file(GLOB files "*.cpp")
 foreach(file ${files})
     get_filename_component(file_basename ${file} NAME_WE)
